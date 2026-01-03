@@ -4,6 +4,9 @@ from moviepy import VideoFileClip
 import librosa
 from pydub import AudioSegment
 import scipy.signal
+from ultralytics import YOLO
+
+
 
 def get_motion_intensity(video_path):
 	cap = cv2.VideoCapture(video_path)
@@ -35,15 +38,19 @@ def get_audio_energy(audio_path):
 def analyze_audio_loudness(audio_path, window_ms=200):
     audio = AudioSegment.from_file(audio_path)
     samples = np.array(audio.get_array_of_samples())
-
-    # Break into chunks (e.g., 200 ms)
+    
     chunk_size = int(window_ms * audio.frame_rate / 1000)
     loudness = [
         np.mean(np.abs(samples[i:i+chunk_size]))
         for i in range(0, len(samples), chunk_size)
     ]
-    return np.array(loudness)
-
+    
+    loudness = np.array(loudness)
+    # DODAJ TO: Normalizacja do zakresu 0-1
+    if np.max(loudness) > 0:
+        loudness = loudness / np.max(loudness)
+        
+    return loudness
 
 
 def extract_audio(video_path, output_path="temp_audio.wav"):
@@ -91,3 +98,84 @@ def normalize_and_combine(energy, loudness):
 		
 		combined_score = 0.2 * energy + 0.8 * loudness
 		return combined_score
+
+def calculate_auto_threshold(loudness_data, multiplier=2.0):
+    """
+    Oblicza próg na podstawie średniej i odchylenia standardowego.
+    Formula: threshold = mean + (multiplier * std)
+    """
+    if len(loudness_data) == 0:
+        return 0.8
+        
+    mean_val = np.mean(loudness_data)
+    std_val = np.std(loudness_data)
+    
+    # Próg to średnia + mnożnik * odchylenie
+    auto_thresh = mean_val + (multiplier * std_val)
+    
+    # Zapewniamy, że próg nie wyjdzie poza zakres 0-1
+    return float(np.clip(auto_thresh, 0.1, 0.95))
+
+
+
+
+def get_visual_activity(video_path, highlights):
+    # Używamy najlżejszego modelu Nano
+    model = YOLO('yolov11x.pt')
+    visual_scores = []
+    
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    
+    for start, end in highlights:
+        # Sprawdzamy klatkę w środku highlightu
+        mid_frame_index = int(((start + end) / 2) * fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, mid_frame_index)
+        ret, frame = cap.read()
+        
+        if ret:
+            results = model(frame, verbose=False)
+            # Liczymy obiekty (np. person/streamer)
+            detection_count = len(results[0].boxes)
+            visual_scores.append(detection_count)
+        else:
+            visual_scores.append(0)
+            
+    cap.release()
+    return visual_scores
+# core/video_analyzer.py
+
+def get_visual_activity_score(video_path, start, end):
+    """
+    Analizuje fragment wideo i zwraca średnią intensywność ruchu.
+    """
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    
+    # Przesunięcie do punktu startowego
+    cap.set(cv2.CAP_PROP_POS_FRAMES, int(start * fps))
+    
+    prev_gray = None
+    motion_values = []
+    
+    # Analizujemy co 5 klatkę dla szybkości obliczeń
+    for i in range(int((end - start) * fps / 5)):
+        ret, frame = cap.read()
+        if not ret: break
+        
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # Zmniejszenie klatki przyspiesza obliczenia
+        gray = cv2.resize(gray, (320, 180)) 
+        
+        if prev_gray is not None:
+            # Obliczanie różnicy między klatkami
+            diff = cv2.absdiff(prev_gray, gray)
+            motion_values.append(np.mean(diff))
+        
+        prev_gray = gray
+        for _ in range(4): cap.grab() # Przeskok klatek
+
+    cap.release()
+    
+    if not motion_values: return 0
+    return np.mean(motion_values)
