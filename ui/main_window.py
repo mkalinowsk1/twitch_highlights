@@ -9,11 +9,9 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from moviepy import VideoFileClip
 sys.path.append("../core")
 
-# Import Twoich funkcji z core
 from video_analyzer import (extract_audio, analyze_audio_loudness, 
                                 detect_highlights_gaming, make_highlight, calculate_auto_threshold, get_visual_activity_score)
 
-# Klasa wykresu Matplotlib
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=5, height=2, dpi=100):
         fig = plt.Figure(figsize=(width, height), dpi=dpi)
@@ -21,10 +19,9 @@ class MplCanvas(FigureCanvas):
         fig.tight_layout()
         super().__init__(fig)
 
-# Wątek analizy tła
 class AnalysisWorker(QThread):
     progress = pyqtSignal(str)
-    finished = pyqtSignal(list, object, float) # highlights, loudness_data
+    finished = pyqtSignal(list, object, float) 
 
     def __init__(self, file_path, threshold):
         super().__init__()
@@ -47,15 +44,12 @@ class AnalysisWorker(QThread):
             self.progress.emit("Wykrywanie wstępnych highlightów (Audio)...")
             initial_highlights = detect_highlights_gaming(loudness, duration, threshold=self.threshold)
 
-            # --- NOWY BLOK: Weryfikacja Wizualna (Visual Scoring) ---
             final_highlights = []
             if initial_highlights:
                 self.progress.emit(f"Weryfikacja ruchu dla {len(initial_highlights)} momentów...")
                 for start, end in initial_highlights:
-                    # Wywołanie nowej funkcji z video_analyzer.py
                     v_score = get_visual_activity_score(self.file_path, start, end)
                     
-                    # Próg 1.5 jest bezpieczny dla streamów (możesz go zmienić w badaniach)
                     if v_score > 1.5:
                         final_highlights.append((start, end))
                         self.progress.emit(f"Zaakceptowano klip: ruch {v_score:.2f}")
@@ -63,13 +57,9 @@ class AnalysisWorker(QThread):
                         self.progress.emit(f"Odrzucono klip (brak ruchu): {v_score:.2f}")
             
             highlights = final_highlights
-            # -------------------------------------------------------
-
-            # Obliczanie auto-threshold (przesunięte tutaj, by zawsze go zwrócić)
             self.progress.emit("Obliczanie optymalnego progu (Auto-Threshold)...")
             auto_val = calculate_auto_threshold(loudness)
 
-            # Czyszczenie zasobów przed renderowaniem
             gc.collect()
             if os.path.exists(temp_audio):
                 try: os.remove(temp_audio)
@@ -80,13 +70,11 @@ class AnalysisWorker(QThread):
                 self.finished.emit([], loudness, auto_val)
                 return
 
-            # Renderowanie tylko zaakceptowanych klipów
             for i, (start, end) in enumerate(highlights):
                 output_file = f'highlight_{i+1}.mp4'
                 self.progress.emit(f"Renderowanie {i+1}/{len(highlights)} ({start:.1f}s - {end:.1f}s)...")
                 make_highlight(self.file_path, start, end, output_file)
             
-            # Przekazujemy wyniki do UI
             self.finished.emit(highlights, loudness, auto_val)
 
         except Exception as e:
@@ -117,7 +105,6 @@ class MainWindow(QWidget):
         self.threshold_slider.valueChanged.connect(self.on_slider_move)
         main_layout.addWidget(self.threshold_slider)
 
-        # Sekcja góry - Import
         top_layout = QHBoxLayout()
         self.label = QLabel("Wybierz stream (.mp4)")
         top_layout.addWidget(self.label)
@@ -161,14 +148,12 @@ class MainWindow(QWidget):
 
 
     def on_slider_move(self, value):
-    # Aktualizacja tekstu na %
         self.threshold_label.setText(f"Czułość detekcji: {value}%")
         if self.last_loudness_data is not None:
             self.plot_data(self.last_loudness_data)
     
     def start_analysis(self):
         self.analyze_button.setEnabled(False)
-        # Przekazujemy znormalizowany próg (np. 0.8) do analizy
         val = self.threshold_slider.value() / 100.0
         self.worker = AnalysisWorker(self.file_path, threshold=val)
         self.worker.progress.connect(self.update_log)
@@ -188,7 +173,6 @@ class MainWindow(QWidget):
         auto_percent = int(auto_threshold * 100)
         self.threshold_slider.setValue(auto_percent)
         self.threshold_label.setText(f"Czułość detekcji (Auto): {auto_percent}%")
-        # Rysowanie wykresu po analizie
         self.plot_data(loudness_data)
         
         if highlights:
@@ -199,14 +183,13 @@ class MainWindow(QWidget):
 
     def plot_data(self, data):
         self.canvas.axes.clear()
-        # Przeliczamy wartość slidera (0-100) na zakres (0.0-1.0)
         current_threshold = self.threshold_slider.value() / 100.0
         
         self.canvas.axes.set_title("Znormalizowana Analiza Natężenia")
         self.canvas.axes.plot(data, color='#1f77b4', label='Głośność')
         self.canvas.axes.axhline(y=current_threshold, color='r', linestyle='--', label='Próg')
         
-        self.canvas.axes.set_ylim(0, 1.1) # Stały zakres osi Y dla lepszej czytelności
+        self.canvas.axes.set_ylim(0, 1.1)
         self.canvas.axes.legend()
         self.canvas.draw()
 
@@ -214,12 +197,9 @@ class MainWindow(QWidget):
     def update_threshold_label(self, value):
         self.threshold_label.setText(f"Próg czułości ({value})")
 
-    
-
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    app.setStyle("Fusion") # Nowoczesny wygląd
+    app.setStyle("Fusion")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

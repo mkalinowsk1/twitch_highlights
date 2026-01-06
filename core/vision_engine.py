@@ -15,10 +15,8 @@ class VisionAnalyzer:
             ret, frame = cap.read()
             if not ret: break
             
-            # Analizuj co 1 sekundę, aby oszczędzić procesor
             if frame_count % int(fps) == 0:
                 results = self.model(frame)
-                # Zapisz timestamp i wykryte obiekty
                 detections.append((frame_count/fps, results[0].boxes.cls.tolist()))
             
             frame_count += 1
