@@ -1,10 +1,15 @@
 import cv2
 import numpy as np
 from moviepy import VideoFileClip
+from moviepy.video.tools.subtitles import SubtitlesClip
+from moviepy import TextClip, CompositeVideoClip
 import librosa
 from pydub import AudioSegment
 import scipy.signal
 from ultralytics import YOLO
+import whisper
+from datetime import timedelta
+import torch
 
 
 def get_motion_intensity(video_path):
@@ -74,11 +79,48 @@ def detect_highlights_gaming(loudness, total_duration, threshold=0.8, min_gap=15
             
     return highlights
 
+# Stare highlighty bez napisów
 def make_highlight(video_path, start, end, output_path):
     with VideoFileClip(video_path) as clip:
         end = min(end, clip.duration)
         new_clip = clip.subclipped(start, end)
-        new_clip.write_videofile(output_path, codec="libx264", audio_codec="aac")
+        new_clip.write_videofile(output_path, 
+            codec="h264_nvenc", 
+            audio_codec="aac",
+            bitrate="8000k",
+            preset="fast",
+            
+            ffmpeg_params=[
+                "-rc", "vbr", 
+                "-cq", "24", 
+                "-pix_fmt", "yuv420p" 
+            ]
+            )
+
+# Nowe higlighty z napisami
+def make_highlight_with_subs(video_path, start, end, output_path):
+    temp_sub_audio = "temp_segment.wav"
+    srt_file = "temp_subs.srt"
+    
+    with VideoFileClip(video_path).subclipped(start, end) as segment:
+        segment.audio.write_audiofile(temp_sub_audio, logger=None)
+        generate_subtitles(temp_sub_audio, srt_file)
+        
+        srt_path_ffmpeg = srt_file.replace("\\", "/").replace(":", "\\:")
+        
+        segment.write_videofile(
+            output_path, 
+            codec="h264_nvenc", 
+            audio_codec="aac",
+            bitrate="8000k",
+            preset="fast",
+            ffmpeg_params=[
+                "-vf", f"subtitles='{srt_path_ffmpeg}'",
+                "-rc", "vbr", 
+                "-cq", "24", 
+                "-pix_fmt", "yuv420p"
+            ]
+        )
 
 def normalize_and_combine(energy, loudness):
 		energy = energy / np.max(energy)
@@ -153,3 +195,18 @@ def get_visual_activity_score(video_path, start, end):
     
     if not motion_values: return 0
     return np.mean(motion_values)
+
+def generate_subtitles(audio_path, output_srt):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(device)
+    model = whisper.load_model("base", device = device)
+    result = model.transcribe(audio_path, fp16 = (device == "cuda"), language = "pl")
+
+    with open(output_srt, "w", encoding="utf-8-sig") as f:
+        for i, segment in enumerate(result['segments'], start = 1):
+            start = str(timedelta(seconds = int(segment['start']))) + ",000"
+            end = str(timedelta(seconds = int(segment['end']))) + ",000"
+            text = segment['text'].strip()
+
+            f.write(f"{i}\n{start} --> {end}\n{text}\n\n")
+    return output_srt

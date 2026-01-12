@@ -10,7 +10,7 @@ from moviepy import VideoFileClip
 sys.path.append("../core")
 
 from video_analyzer import (extract_audio, analyze_audio_loudness, 
-                                detect_highlights_gaming, make_highlight, calculate_auto_threshold, get_visual_activity_score)
+                                detect_highlights_gaming, make_highlight_with_subs, calculate_auto_threshold, get_visual_activity_score, make_highlight)
 
 class MplCanvas(FigureCanvas):
     def __init__(self, parent=None, width=5, height=2, dpi=100):
@@ -73,7 +73,7 @@ class AnalysisWorker(QThread):
             for i, (start, end) in enumerate(highlights):
                 output_file = f'highlight_{i+1}.mp4'
                 self.progress.emit(f"Renderowanie {i+1}/{len(highlights)} ({start:.1f}s - {end:.1f}s)...")
-                make_highlight(self.file_path, start, end, output_file)
+                make_highlight_with_subs(self.file_path, start, end, output_file)
             
             self.finished.emit(highlights, loudness, auto_val)
 
