@@ -10,6 +10,8 @@ from ultralytics import YOLO
 import whisper
 from datetime import timedelta
 import torch
+import os
+import time
 
 
 def get_motion_intensity(video_path):
@@ -97,30 +99,43 @@ def make_highlight(video_path, start, end, output_path):
             ]
             )
 
-# Nowe higlighty z napisami
-def make_highlight_with_subs(video_path, start, end, output_path):
-    temp_sub_audio = "temp_segment.wav"
-    srt_file = "temp_subs.srt"
+def make_highlight_with_subs(video_path, start, end, filename):
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "output_highlights")
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
     
-    with VideoFileClip(video_path).subclipped(start, end) as segment:
-        segment.audio.write_audiofile(temp_sub_audio, logger=None)
-        generate_subtitles(temp_sub_audio, srt_file)
-        
-        srt_path_ffmpeg = srt_file.replace("\\", "/").replace(":", "\\:")
-        
-        segment.write_videofile(
-            output_path, 
-            codec="h264_nvenc", 
-            audio_codec="aac",
-            bitrate="8000k",
-            preset="fast",
-            ffmpeg_params=[
-                "-vf", f"subtitles='{srt_path_ffmpeg}'",
-                "-rc", "vbr", 
-                "-cq", "24", 
-                "-pix_fmt", "yuv420p"
-            ]
-        )
+    output_path = os.path.join(output_dir, filename)
+    temp_sub_audio = f"temp_audio_{int(start)}.wav"
+    srt_file = f"temp_subs_{int(start)}.srt"
+    
+    try:
+        with VideoFileClip(video_path).subclipped(start, end) as segment:
+            segment.audio.write_audiofile(temp_sub_audio, logger=None)
+            has_subs = generate_subtitles(temp_sub_audio, srt_file)
+            
+            f_params = ["-rc", "vbr", "-cq", "24", "-pix_fmt", "yuv420p"]
+            
+            if has_subs and os.path.exists(srt_file) and os.path.getsize(srt_file) > 0:
+                srt_path_ffmpeg = os.path.abspath(srt_file).replace("\\", "/").replace(":", "\\:")
+                f_params.extend(["-vf", f"subtitles='{srt_path_ffmpeg}'"])
+                time.sleep(0.1)
+            
+            segment.write_videofile(
+                output_path, 
+                codec="h264_nvenc", 
+                audio_codec="aac",
+                bitrate="8000k",
+                preset="fast",
+                ffmpeg_params=f_params
+            )
+
+    finally:
+        for f in [temp_sub_audio, srt_file]:
+            if os.path.exists(f):
+                try: os.remove(f)
+                except: pass
 
 def normalize_and_combine(energy, loudness):
 		energy = energy / np.max(energy)
@@ -197,16 +212,18 @@ def get_visual_activity_score(video_path, start, end):
     return np.mean(motion_values)
 
 def generate_subtitles(audio_path, output_srt):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(device)
-    model = whisper.load_model("base", device = device)
-    result = model.transcribe(audio_path, fp16 = (device == "cuda"), language = "pl")
+    import whisper
+    model = whisper.load_model("base", device="cuda")
+    result = model.transcribe(audio_path, language="pl")
 
-    with open(output_srt, "w", encoding="utf-8-sig") as f:
-        for i, segment in enumerate(result['segments'], start = 1):
-            start = str(timedelta(seconds = int(segment['start']))) + ",000"
-            end = str(timedelta(seconds = int(segment['end']))) + ",000"
+    if not result['segments']:
+        return False 
+
+    from datetime import timedelta
+    with open(output_srt, "w", encoding="utf-8") as f:
+        for i, segment in enumerate(result['segments'], start=1):
+            start = str(timedelta(seconds=int(segment['start']))) + ",000"
+            end = str(timedelta(seconds=int(segment['end']))) + ",000"
             text = segment['text'].strip()
-
             f.write(f"{i}\n{start} --> {end}\n{text}\n\n")
-    return output_srt
+    return True

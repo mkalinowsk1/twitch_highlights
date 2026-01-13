@@ -50,7 +50,7 @@ class AnalysisWorker(QThread):
                 for start, end in initial_highlights:
                     v_score = get_visual_activity_score(self.file_path, start, end)
                     
-                    if v_score > 1.5:
+                    if v_score > 1:
                         final_highlights.append((start, end))
                         self.progress.emit(f"Zaakceptowano klip: ruch {v_score:.2f}")
                     else:
@@ -71,9 +71,9 @@ class AnalysisWorker(QThread):
                 return
 
             for i, (start, end) in enumerate(highlights):
-                output_file = f'highlight_{i+1}.mp4'
-                self.progress.emit(f"Renderowanie {i+1}/{len(highlights)} ({start:.1f}s - {end:.1f}s)...")
-                make_highlight_with_subs(self.file_path, start, end, output_file)
+                filename = f'highlight_{i+1}.mp4'
+                self.progress.emit(f"Renderowanie {i+1}/{len(highlights)}...")
+                make_highlight_with_subs(self.file_path, start, end, filename)
             
             self.finished.emit(highlights, loudness, auto_val)
 
